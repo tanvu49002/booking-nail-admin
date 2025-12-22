@@ -248,6 +248,7 @@ export default function Calendar({ employees }: EmployeeProps) {
         }}
         events={events}
         eventContent={renderEventContent}
+        slotEventOverlap={false}
         eventTimeFormat={{
           hour: "2-digit",
           minute: "2-digit",
