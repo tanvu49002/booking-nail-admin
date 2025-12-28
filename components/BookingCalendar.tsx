@@ -1,11 +1,7 @@
 "use client";
-import FullCalendar from "@fullcalendar/react";
-import timeGridPlugin from "@fullcalendar/timegrid";
-import { useState, useEffect, useCallback } from "react";
-// import { ReloadOutlined } from "@ant-design/icons";
+import { useState, useMemo } from "react";
 import {
   Select,
-  Space,
   message,
   Modal,
   Descriptions,
@@ -13,176 +9,74 @@ import {
   Button,
   TimePicker,
 } from "antd";
+import { Calendar, dayjsLocalizer } from "react-big-calendar";
+import dayjs from "dayjs";
+import "react-big-calendar/lib/css/react-big-calendar.css";
+import isBetween from "dayjs/plugin/isBetween";
+import isSameOrAfter from "dayjs/plugin/isSameOrAfter";
+import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
+import minMax from "dayjs/plugin/minMax";
+import { StrapiBooking, CalendarEvent } from "../types";
+import { useRouter } from "next/navigation";
 import axios from "axios";
-import { EventContentArg, EventClickArg } from "@fullcalendar/core";
-import dayjs, { Dayjs } from "dayjs";
-// import viLocale from "@fullcalendar/core/locales/vi";
-interface BookingUpdatePayload {
-  data: {
-    booking_status?: string;
-    booking_end?: string | null;
-    employee?: string | null;
-  };
+interface BookingCalendarProps {
+  employees: { label: string; value: string }[];
+  bookings: StrapiBooking[];
 }
-interface Service {
-  documentId: string;
-  service_name: string;
-  service_price: number;
-  working_time: number;
-}
-interface SelectOption {
-  label: string;
-  value: string;
-}
-interface CalendarEvent {
-  documentId?: string;
-  title: string;
-  start: string;
-  end: string;
-  extendedProps: {
-    customerName: string;
-    phone?: string;
-    email?: string;
-    note?: string;
-    status?: string;
-    employeeName?: string;
-    employeeId?: string;
-    bookingCode?: string;
-
-    services?: Array<{
-      service_name: string;
-      service_price: number;
-      working_time: number;
-    }>;
-    totalPrice?: number;
-  };
-}
-interface EmployeeProps {
-  employees: SelectOption[];
-}
-export default function Calendar({ employees }: EmployeeProps) {
-  const ALL_EMPLOYEES_OPTION = "All Staffs";
-  const [selectedEmpId, setSelectedEmpId] = useState(ALL_EMPLOYEES_OPTION);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
+dayjs.extend(isBetween);
+dayjs.extend(isSameOrAfter);
+dayjs.extend(isSameOrBefore);
+dayjs.extend(minMax);
+const localizer = dayjsLocalizer(dayjs);
+const UNASSIGNED_ID = "unassigned";
+export default function BookingCalendar({
+  employees,
+  bookings,
+}: BookingCalendarProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<CalendarEvent | null>(
     null
   );
+
   const [editStatus, setEditStatus] = useState<string | undefined>(undefined);
-  const [editEndTime, setEditEndTime] = useState<Dayjs | null>(null);
+  const [editEndTime, setEditEndTime] = useState<dayjs.Dayjs | null>(null);
   const [editEmployeeId, setEditEmployeeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const fetchBookings = useCallback(async () => {
-    try {
-      const params: Record<string, string | string[]> = {
-        populate: "*",
-      };
-      if (selectedEmpId !== ALL_EMPLOYEES_OPTION) {
-        params["filters[employee][documentId][$eq]"] = selectedEmpId;
-      }
-      const res = await axios.get("http://localhost:1337/api/bookings", {
-        params,
-      });
-
-      const rawData = res?.data?.data;
-      if (rawData && Array.isArray(rawData)) {
-        const mappedEvents = rawData.map((item) => {
-          const status = item.booking_status;
-          const eventColor = getStatusColor(status);
-          return {
-            id: item.documentId,
-            title: item.name,
-            start: `${item.booking_date}T${item.booking_time}`,
-            end: `${item.booking_date}T${item.booking_end}`,
-            color: eventColor,
-            extendedProps: {
-              documentId: item.documentId,
-              customerName: item.name,
-              phone: item.phone,
-              email: item.email,
-              note: item.note,
-              status: item.booking_status,
-              employeeName: item.employee?.employee_name || "Not assigned",
-              employeeId: item.employee?.documentId || null,
-              totalPrice: item.total_price,
-              bookingCode: item.booking_code,
-              services: item.services.map((service: Service) => ({
-                service_name: service.service_name,
-                service_price: service.service_price,
-                working_time: service.working_time,
-              })),
-            },
-          };
-        });
-        console.log("mappedEvents:", mappedEvents);
-        setEvents(mappedEvents);
-      }
-    } catch (error) {
-      console.error("error: ", error);
-      message.error("Load booking failed !");
-    }
-  }, [selectedEmpId]);
-
-  useEffect(() => {
-    fetchBookings();
-  }, [fetchBookings]);
-
-  useEffect(() => {
-    if (selectedBooking) {
-      setEditStatus(selectedBooking.extendedProps.status);
-      setEditEndTime(dayjs(selectedBooking.end));
-      setEditEmployeeId(selectedBooking.extendedProps.employeeId || null);
-    }
-  }, [selectedBooking]);
-  const options = [
-    { label: "All Staffs", value: ALL_EMPLOYEES_OPTION },
-    ...employees,
-  ];
-  const handleChange = (newValues: string) => {
-    setSelectedEmpId(newValues);
-  };
-  const handleEventClick = (info: EventClickArg) => {
-    // Lấy thông tin từ sự kiện được click
-    const clickedEvent = {
-      documentId: info.event.extendedProps.documentId,
-      title: info.event.title,
-      start: info.event.startStr,
-      end: info.event.endStr,
-      bookingCode: info.event.extendedProps.bookingCode,
-      extendedProps: info.event.extendedProps as CalendarEvent["extendedProps"],
+  const router = useRouter();
+  const calendarResources = useMemo(() => {
+    const anyStaffResource = {
+      label: "Unassigned",
+      value: UNASSIGNED_ID,
     };
-
-    setSelectedBooking(clickedEvent);
-    setIsModalOpen(true);
-  };
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setSelectedBooking(null);
-    setEditStatus(undefined);
-    setEditEndTime(null);
-    setEditEmployeeId(null);
-  };
+    return [anyStaffResource, ...employees];
+  }, [employees]);
   const handleSave = async () => {
-    if (!selectedBooking) return;
+    if (!selectedBooking || !selectedBooking.documentId) return;
+
     setLoading(true);
     try {
-      const payload: BookingUpdatePayload = {
-        data: {},
-      };
       const formattedEndTime = editEndTime
         ? editEndTime.format("HH:mm:ss")
         : null;
-      payload.data.booking_status = editStatus;
-      payload.data.booking_end = formattedEndTime;
-      payload.data.employee = editEmployeeId ? editEmployeeId : null;
+      const finalEmployeeId =
+        editEmployeeId === UNASSIGNED_ID ? null : editEmployeeId;
+      const payload = {
+        data: {
+          booking_status: editStatus,
+          booking_end: formattedEndTime,
+          employee: finalEmployeeId,
+        },
+      };
 
       await axios.put(
         `http://localhost:1337/api/bookings/${selectedBooking.documentId}`,
         payload
       );
+
       message.success("Update booking successfully!");
-      await fetchBookings();
-      handleCloseModal();
+
+      setIsModalOpen(false);
+      router.refresh();
     } catch (error) {
       console.error("Update error:", error);
       message.error("Failed to update booking.");
@@ -190,73 +84,110 @@ export default function Calendar({ employees }: EmployeeProps) {
       setLoading(false);
     }
   };
+  const handleSelectEvent = (event: CalendarEvent) => {
+    setSelectedBooking(event);
+
+    setEditStatus(event.extendedProps.status);
+    setEditEndTime(dayjs(event.end));
+    setEditEmployeeId(event.extendedProps.employeeId || UNASSIGNED_ID);
+
+    setIsModalOpen(true);
+  };
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedBooking(null);
+  };
+  const events = useMemo(() => {
+    if (!bookings) return [];
+
+    return bookings.map((booking) => ({
+      documentId: booking.documentId,
+      title: booking.name,
+      start: dayjs(`${booking.booking_date}T${booking.booking_time}`).toDate(),
+      end: dayjs(`${booking.booking_date}T${booking.booking_end}`).toDate(),
+      resourceId: booking.employee?.documentId || UNASSIGNED_ID,
+      extendedProps: {
+        customerName: booking.name,
+        phone: booking.phone,
+        email: booking.email,
+        note: booking.note,
+        status: booking.booking_status,
+        employeeName: booking.employee?.employee_name,
+        employeeId: booking.employee?.documentId,
+        bookingCode: booking.booking_code,
+        services: booking.services,
+        totalPrice: booking.total_price,
+      },
+    }));
+  }, [bookings]);
   const getStatusColor = (status?: string) => {
     switch (status?.toLowerCase()) {
-      case "waiting for approve":
-        return "#faad14";
       case "approved":
-        return "#52c41a";
+        return "success";
+      case "waiting for approve":
+        return "warning";
       case "reject":
-        return "#f5222d";
+        return "error";
       case "complete":
-        return "#1890ff";
+        return "processing";
       default:
-        return "#d9d9d9";
+        return "default";
     }
   };
-  const renderEventContent = (eventInfo: EventContentArg) => {
-    return (
-      <div
-        className="flex flex-row justify-center items-center p-1 border-0 w-full h-full overflow-hidden select-none"
-        style={{ backgroundColor: eventInfo.backgroundColor }}
-        tabIndex={-1}
-      >
-        <div className="flex-shrink-0 font-semibold text-white text-xs whitespace-nowrap">
-          {eventInfo.timeText}
-        </div>
-        <div className="font-semibold text-white text-xs truncate">
-          - {eventInfo.event.extendedProps.customerName}
-        </div>
-      </div>
-    );
+  const eventStyleGetter = (event: CalendarEvent) => {
+    const status = event.extendedProps.status?.toLowerCase();
+
+    let backgroundColor = "#94a2ad9d";
+
+    switch (status) {
+      case "approved":
+        backgroundColor = "#52c41a";
+        break;
+      case "waiting for approve":
+        backgroundColor = "#faad14";
+        break;
+      case "reject":
+        backgroundColor = "#ff4d4f";
+        break;
+      case "complete":
+        backgroundColor = "#1890ff";
+        break;
+      default:
+        backgroundColor = "#94a2ad9d";
+    }
+
+    return {
+      style: {
+        backgroundColor: backgroundColor,
+        borderRadius: "6px",
+        opacity: 0.8,
+        color: "white",
+        border: "0px",
+        display: "block",
+      },
+    };
   };
   return (
     <>
-      <div className="flex justify-between items-center py-4">
-        <h1 className="font-bold text-2xl">Booking Calendar</h1>
-        <Space vertical style={{ width: "200px" }}>
-          <Select
-            style={{ width: "100%" }}
-            placeholder="Chọn nhân viên..."
-            options={options}
-            value={selectedEmpId}
-            onChange={handleChange}
-          />
-        </Space>
+      <div className="p-4 h-full">
+        <Calendar
+          eventPropGetter={eventStyleGetter}
+          dayLayoutAlgorithm="no-overlap"
+          localizer={localizer}
+          events={events}
+          defaultView="day"
+          views={["day"]}
+          resources={calendarResources}
+          resourceIdAccessor="value"
+          resourceTitleAccessor="label"
+          step={30}
+          timeslots={2}
+          min={dayjs().set("hour", 7).set("minute", 0).toDate()}
+          max={dayjs().set("hour", 22).set("minute", 0).toDate()}
+          style={{ height: "800px" }}
+          onSelectEvent={handleSelectEvent}
+        />
       </div>
-      <FullCalendar
-        // locale={viLocale}
-        plugins={[timeGridPlugin]}
-        initialView="timeGridWeek"
-        allDaySlot={false}
-        slotMinTime="07:30:00"
-        height="auto"
-        headerToolbar={{
-          left: "today prev,next",
-          center: "",
-          right: "title",
-        }}
-        events={events}
-        eventContent={renderEventContent}
-        slotEventOverlap={false}
-        eventTimeFormat={{
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true,
-          meridiem: "short",
-        }}
-        eventClick={handleEventClick}
-      />
       {/* --- MODAL chi tiết booking --- */}
       <Modal
         title={
@@ -280,8 +211,8 @@ export default function Calendar({ employees }: EmployeeProps) {
           <Button
             key="save"
             type="primary"
-            className="bg-yellow-500 hover:bg-yellow-600 border-none"
             onClick={handleSave}
+            className="bg-yellow-500 hover:bg-yellow-600 border-none"
             loading={loading}
           >
             Save Changes
@@ -290,7 +221,6 @@ export default function Calendar({ employees }: EmployeeProps) {
       >
         {selectedBooking && (
           <div className="flex flex-col gap-6 py-4">
-            {/* 1. thông tin booking */}
             <Descriptions
               bordered
               column={2}
@@ -302,7 +232,6 @@ export default function Calendar({ employees }: EmployeeProps) {
               <Descriptions.Item label="Customer Name">
                 <div className="flex items-center gap-2">
                   {selectedBooking.extendedProps.customerName}
-                  {/* <ReloadOutlined className="text-blue-500 cursor-pointer" /> */}
                 </div>
               </Descriptions.Item>
               <Descriptions.Item label="Phone">
@@ -336,7 +265,6 @@ export default function Calendar({ employees }: EmployeeProps) {
               </Descriptions.Item>
             </Descriptions>
 
-            {/* 2. dịch vụ đã book */}
             <hr className="border-gray-200" />
 
             <div>
@@ -361,7 +289,6 @@ export default function Calendar({ employees }: EmployeeProps) {
               </div>
             </div>
 
-            {/* 3. tổng tiền */}
             <div className="flex justify-between items-center bg-green-50 p-3 px-6 border border-green-200 rounded-md">
               <span className="font-bold text-gray-700">Total Price:</span>
               <span className="font-bold text-green-600 text-xl">
@@ -369,7 +296,6 @@ export default function Calendar({ employees }: EmployeeProps) {
               </span>
             </div>
             <hr className="border-gray-200" />
-            {/* 4. ACTION FORM (Status, End Time, Employee) */}
             <div className="gap-4 grid grid-cols-3 mt-2">
               <div className="flex flex-col gap-1">
                 <label className="font-semibold text-gray-500 text-xs">
@@ -405,7 +331,6 @@ export default function Calendar({ employees }: EmployeeProps) {
                   className="w-full"
                   value={editEndTime}
                   onChange={(time) => {
-                    console.log("time changed:", time);
                     setEditEndTime(time);
                   }}
                 />
@@ -419,7 +344,7 @@ export default function Calendar({ employees }: EmployeeProps) {
                   className="w-full"
                   placeholder="Select employee"
                   defaultValue={selectedBooking.extendedProps.employeeName}
-                  options={employees}
+                  options={calendarResources}
                   value={editEmployeeId}
                   onChange={(value) => {
                     setEditEmployeeId(value || null);

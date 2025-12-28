@@ -1,15 +1,12 @@
-import Calendar from "@/components/Calendar";
+import BookingCalendar from "@/components/BookingCalendar";
 import axios from "axios";
-interface EmployeeAPI {
-  documentId: string;
-  employee_name: string;
-  employee_email: string;
-  employee_phone: string;
-  employee_avatar: string;
-}
+import { StrapiBooking, EmployeeAPI } from "@/types";
+
 async function getEmployees() {
   try {
-    const response = await axios.get("http://localhost:1337/api/employees");
+    const response = await axios.get(
+      "http://localhost:1337/api/employees?sort=employee_name:asc"
+    );
     const data = response?.data?.data;
 
     return data.map((emp: EmployeeAPI) => ({
@@ -25,11 +22,25 @@ async function getEmployees() {
     return [];
   }
 }
+async function getBookings() {
+  try {
+    const response = await axios.get(
+      "http://localhost:1337/api/bookings?populate=*"
+    );
+    return response?.data?.data as StrapiBooking[];
+  } catch (error) {
+    console.error("Error fetching bookings:", error);
+    return [];
+  }
+}
 export default async function Home() {
-  const employees = await getEmployees();
+  const [employees, bookings] = await Promise.all([
+    getEmployees(),
+    getBookings(),
+  ]);
   return (
-    <div className="bg-white p-8">
-      <Calendar employees={employees} />
+    <div className="bg-white p-8 h-full">
+      <BookingCalendar employees={employees} bookings={bookings} />
     </div>
   );
 }
